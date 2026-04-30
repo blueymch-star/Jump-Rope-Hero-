@@ -1,0 +1,6 @@
+{
+  "name": "Jump Rope Hero - 跳繩次數統計",
+  "description": "專為學校設計的跳繩次數統計與排行榜系統，支援班級管理、個人排行及年級總榜。",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

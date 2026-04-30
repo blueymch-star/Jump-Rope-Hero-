@@ -1,0 +1,52 @@
+{
+  "entities": {
+    "Class": {
+      "title": "Class",
+      "description": "A school class",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "gradeLevel": { "type": "string", "enum": ["Low", "Middle", "High"] },
+        "totalCount": { "type": "integer" }
+      },
+      "required": ["name", "gradeLevel"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "A student in a class",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "classId": { "type": "string" },
+        "totalCount": { "type": "integer" }
+      },
+      "required": ["name", "classId"]
+    },
+    "JumpRecord": {
+      "title": "Jump Record",
+      "description": "Daily jump rope record for a student",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "classId": { "type": "string" },
+        "count": { "type": "integer" },
+        "date": { "type": "string", "format": "date" }
+      },
+      "required": ["studentId", "classId", "count", "date"]
+    }
+  },
+  "firestore": {
+    "classes": {
+      "schema": "Class",
+      "description": "Collection of all classes"
+    },
+    "students": {
+      "schema": "Student",
+      "description": "Collection of all students"
+    },
+    "records": {
+      "schema": "JumpRecord",
+      "description": "Collection of daily jump rope records"
+    }
+  }
+}

@@ -1,0 +1,78 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isAdmin() {
+      // Hardcoded admin for demo: blueymch@gmail.com
+      // We check email. We can also check email_verified if strongly required.
+      return isSignedIn() && request.auth.token.email == 'blueymch@gmail.com';
+    }
+
+    function isValidId(id) {
+       // Relax regex to allow Chinese characters and other symbols if used in IDs
+       return id is string && id.size() <= 256;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Collections ---
+
+    match /classes/{classId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+      
+      function isValidClass(data) {
+        return data.name is string && data.name.size() > 0
+            && (data.get('totalCount', 0) is int);
+      }
+    }
+
+    match /students/{studentId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+
+      function isValidStudent(data) {
+        return data.name is string && data.name.size() > 0
+            && isValidId(data.classId)
+            && (data.get('totalCount', 0) is int);
+      }
+    }
+
+    match /records/{recordId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+
+      function isValidRecord(data) {
+        return isValidId(data.studentId)
+            && isValidId(data.classId)
+            && data.count is int && data.count >= 0
+            && data.date is string && data.date.matches('^\\d{4}-\\d{2}-\\d{2}$');
+      }
+    }
+    
+    // Global stats or other potential collections
+    match /stats/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+  }
+}
