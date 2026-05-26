@@ -274,7 +274,7 @@ const TowerClimbingView = ({ classes }: { classes: Class[] }) => {
                       initial={{ opacity: 0, y: 5 }}
                       animate={{ opacity: 1, y: 0 }}
                       className={cn(
-                        "px-1.5 py-0.5 rounded-full border text-[5px] font-black shadow-2xl backdrop-blur-xl transition-all whitespace-nowrap",
+                        "px-1.8 py-0.8 rounded-full border text-[8px] font-black shadow-2xl backdrop-blur-xl transition-all whitespace-nowrap",
                         towerCount > 0 
                           ? "bg-yellow-400 text-yellow-950 border-white/50" 
                           : "bg-black/60 text-white border-white/20"
@@ -286,12 +286,12 @@ const TowerClimbingView = ({ classes }: { classes: Class[] }) => {
 
                   {/* Icon Marker */}
                   <div className={cn(
-                    "w-3.5 h-3.5 rounded-full border flex items-center justify-center ring-2 ring-black/40 transition-all",
+                    "w-4 h-4 rounded-full border flex items-center justify-center ring-2 ring-black/40 transition-all",
                     (towerCount > 0 || isTopped) && "drop-shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-pulse shadow-white/50",
                     idx % 3 === 0 ? "bg-indigo-500 border-indigo-300" : 
                     idx % 3 === 1 ? "bg-teal-500 border-teal-300" : "bg-rose-500 border-rose-300"
                   )}>
-                    <UserIcon size={7} className="text-white" fill="white" />
+                    <UserIcon size={9} className="text-white" fill="white" />
                   </div>
                 </div>
               </motion.div>
