@@ -470,7 +470,7 @@ export default function App() {
                 <Trophy size={24} />
               </div>
               <div>
-                <h1 className="font-black text-2xl tracking-tighter leading-none text-white">Happy Jumping <span className="text-indigo-400">v2.0</span></h1>
+                <h1 className="font-black text-2xl tracking-tighter leading-none text-white">Happy Jumping <span className="text-indigo-400">v1.0</span></h1>
                 <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1.5 flex items-center gap-1.5">
                   <span className="w-1 h-1 bg-indigo-500 rounded-full animate-pulse"></span>
                   Jump Rope Tracking
