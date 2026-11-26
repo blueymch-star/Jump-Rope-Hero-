@@ -18,7 +18,9 @@ export const useOpenCV = () => {
 
   useEffect(() => {
     const checkOpenCV = () => {
-      if (window.cvReady && window.cv && typeof window.cv.Mat === 'function') {
+      if (window.cv && typeof window.cv.Mat === 'function') {
+        window.cvReady = true;
+        window.cvLoadStatus = 'ready';
         setReady(true);
         setError(null);
         return true;
