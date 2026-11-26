@@ -13,17 +13,23 @@
         var checkRuntime = function() {
           if (typeof window.cv !== 'undefined') {
             if (typeof window.cv.then === 'function') {
-              window.cv.then(function(resolvedCv) {
-                window.cv = resolvedCv;
-                window.cvReady = true;
-                window.cvLoadStatus = 'ready';
-                window.cvLoadError = null;
-                console.log('OpenCV.js is ready (Promise)');
-              }).catch(function(err) {
+              try {
+                window.cv.then(function(resolvedCv) {
+                  if (resolvedCv) {
+                    window.cv = resolvedCv;
+                  }
+                  if (window.cv && typeof window.cv.Mat === 'function') {
+                    window.cvReady = true;
+                    window.cvLoadStatus = 'ready';
+                    window.cvLoadError = null;
+                    console.log('OpenCV.js is ready (thenable)');
+                  }
+                });
+              } catch (err) {
                 window.cvLoadStatus = 'error';
                 window.cvLoadError = 'OpenCV WASM 初始化失敗';
                 console.error('OpenCV WASM init error:', err);
-              });
+              }
               return;
             }
             if (typeof window.cv.Mat === 'function') {

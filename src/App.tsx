@@ -2274,10 +2274,12 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
     const [students, setStudents] = useState<Student[]>([]);
     const [counts, setCounts] = useState<Record<string, number>>({});
     const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-    const [scanSessionIndex, setScanSessionIndex] = useState(0);
+    const [scanSessionMode, setScanSessionMode] = useState<number | 'all'>(0);
     const [showVerify, setShowVerify] = useState(false);
-    const [scanConfirmResult, setScanConfirmResult] = useState<number[] | null>(null);
-    const [scanTargetDate, setScanTargetDate] = useState(date);
+    const [scanResultsBySession, setScanResultsBySession] = useState<Record<number, number[]> | null>(null);
+    const [sessionDates, setSessionDates] = useState<Record<number, string>>({ 0: date, 1: date, 2: date, 3: date });
+    const [enabledSessions, setEnabledSessions] = useState<Record<number, boolean>>({ 0: true, 1: true, 2: true, 3: true });
+    const [activeVerifySession, setActiveVerifySession] = useState<number>(0);
     const [scanMultiplier, setScanMultiplier] = useState<50 | 100>(100);
     
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -2301,7 +2303,7 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
         fetchStudents();
     }, [selectedClassId]);
 
-    const analyzeLaps = (warped: any) => {
+    const analyzeLaps = (warped: any, sessionIndices: number[]) => {
         const cv = (window as any).cv;
         const ROWS = 25, COLS = 8;
         let debugMat = warped.clone();
@@ -2309,47 +2311,52 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
         cv.cvtColor(warped, gray, cv.COLOR_RGBA2GRAY, 0);
         cv.threshold(gray, gray, 120, 255, cv.THRESH_BINARY_INV);
 
-        const startX_Ratio = 0.183;
+        const startX_Ratio = 0.188;
         const startY_Ratio = 0.105;
         const endY_Ratio = 0.874;
         const sessionW_Ratio = 0.169;
         const sessionGap = 0.023;
 
-        const gridStartX = warped.cols * (startX_Ratio + (scanSessionIndex * (sessionW_Ratio + sessionGap)));
         const gridStartY = warped.rows * startY_Ratio;
         const gridTotalHeight = warped.rows * (endY_Ratio - startY_Ratio);
 
         const cellW = (warped.cols * sessionW_Ratio) / COLS;
         const cellH = gridTotalHeight / ROWS;
+        const rectThickness = 2;
 
-        let results = [];
-        for (let i = 0; i < ROWS; i++) {
-            let lastLap = 0;
-            for (let j = 0; j < COLS; j++) {
-                const sampleSize = 0.28;
-                const offset = (1 - sampleSize) / 2;
+        const resultsBySession: Record<number, number[]> = {};
+        for (const sIdx of sessionIndices) {
+            const gridStartX = warped.cols * (startX_Ratio + (sIdx * (sessionW_Ratio + sessionGap)));
+            let results = [];
+            for (let i = 0; i < ROWS; i++) {
+                let lastLap = 0;
+                for (let j = 0; j < COLS; j++) {
+                    const sampleSize = 0.40;
+                    const offset = (1 - sampleSize) / 2;
 
-                let x = Math.floor(gridStartX + (j * cellW) + (cellW * offset));
-                let y = Math.floor(gridStartY + (i * cellH) + (cellH * offset));
-                let w = Math.floor(cellW * sampleSize);
-                let h = Math.floor(cellH * sampleSize);
+                    let x = Math.floor(gridStartX + (j * cellW) + (cellW * offset));
+                    let y = Math.floor(gridStartY + (i * cellH) + (cellH * offset));
+                    let w = Math.floor(cellW * sampleSize);
+                    let h = Math.floor(cellH * sampleSize);
 
-                let rect = new cv.Rect(x, y, w, h);
-                let cell = gray.roi(rect);
-                let density = (cv.countNonZero(cell) / (rect.width * rect.height)) * 100;
+                    let rect = new cv.Rect(x, y, w, h);
+                    let cell = gray.roi(rect);
+                    let density = (cv.countNonZero(cell) / (rect.width * rect.height)) * 100;
 
-                let isMarked = density > 10;
-                if (isMarked) lastLap = j + 1;
+                    let isMarked = density > 10;
+                    if (isMarked) lastLap = j + 1;
 
-                let color = isMarked ? new cv.Scalar(0, 255, 0, 255) : new cv.Scalar(255, 0, 0, 255);
-                cv.rectangle(debugMat, new cv.Point(x, y), new cv.Point(x + w, y + h), color, 2);
-                cell.delete();
+                    let color = isMarked ? new cv.Scalar(0, 255, 0, 255) : new cv.Scalar(255, 0, 0, 255);
+                    cv.rectangle(debugMat, new cv.Point(x, y), new cv.Point(x + w, y + h), color, rectThickness);
+                    cell.delete();
+                }
+                results.push(lastLap);
             }
-            results.push(lastLap);
+            resultsBySession[sIdx] = results;
         }
 
         gray.delete();
-        return { results, debugMat };
+        return { resultsBySession, debugMat };
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -2359,8 +2366,22 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
             return;
         }
 
+        const targetIndices = scanSessionMode === 'all' ? [0, 1, 2, 3] : [scanSessionMode];
+        const initEnabled: Record<number, boolean> = {};
+        for (const idx of targetIndices) {
+            initEnabled[idx] = true;
+        }
+
         setScanning(true);
-        setScanTargetDate(date);
+        setSessionDates(prev => {
+            const next = { ...prev };
+            for (const idx of targetIndices) {
+                if (!next[idx]) next[idx] = date;
+            }
+            return next;
+        });
+        setEnabledSessions(initEnabled);
+        setActiveVerifySession(targetIndices[0]);
 
         const reader = new FileReader();
         reader.onerror = () => {
@@ -2385,9 +2406,9 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                     src = cv.imread(img);
                     warped = new cv.Mat();
                     cv.resize(src, warped, new cv.Size(800, 1000));
-                    const analyzed = analyzeLaps(warped);
+                    const analyzed = analyzeLaps(warped, targetIndices);
                     debugMat = analyzed.debugMat;
-                    setScanConfirmResult(analyzed.results);
+                    setScanResultsBySession(analyzed.resultsBySession);
                     setScanning(false);
                     setShowVerify(true);
                     
@@ -2433,7 +2454,18 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
     };
 
     const handleSave = async () => {
-        if (!selectedClassId || !scanConfirmResult || saving) return;
+        if (!selectedClassId || !scanResultsBySession || saving) return;
+
+        const scannedIndices = Object.keys(scanResultsBySession).map(Number).sort((a, b) => a - b);
+        const sessionsToSave = scannedIndices.filter(idx => enabledSessions[idx] !== false);
+        if (sessionsToSave.length === 0) {
+            alert('請至少勾選一個要儲存的欄位！');
+            return;
+        }
+        if (sessionsToSave.some(idx => !sessionDates[idx])) {
+            alert('請為所有勾選的欄位選擇歸檔日期！');
+            return;
+        }
         
         if (!user && !auth.currentUser) {
             alert('請先登入 Google 帳號以啟用雲端同步功能');
@@ -2444,67 +2476,84 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
         setSaving(true);
         try {
             const batch = writeBatch(db);
-            const targetSession = SESSIONS[scanSessionIndex];
             const multiplier = scanMultiplier; // Use the multiplier selected during scanning
             
-            // Optimization: Fetch all existing records for this class/date/session in one go
-            const q = query(
-                collection(db, 'records'),
-                where('classId', '==', selectedClassId),
-                where('date', '==', scanTargetDate),
-                where('session', '==', targetSession)
-            );
-            const existingRecordsSnap = await getDocs(q).catch(err => {
-                handleFSLocalError(err, 'get', `records/${selectedClassId}/${scanTargetDate}/${targetSession}`);
-                throw err;
-            });
-            const existingCountsMap: Record<string, number> = {};
-            existingRecordsSnap.docs.forEach(docSnap => {
-                const data = docSnap.data();
-                existingCountsMap[data.studentId] = data.count || 0;
-            });
+            // Fetch all existing records for each selected session/date in parallel
+            const existingCountsBySession: Record<number, Record<string, number>> = {};
+            await Promise.all(sessionsToSave.map(async (sIdx) => {
+                const targetSession = SESSIONS[sIdx];
+                const targetDate = sessionDates[sIdx];
+                const q = query(
+                    collection(db, 'records'),
+                    where('classId', '==', selectedClassId),
+                    where('date', '==', targetDate),
+                    where('session', '==', targetSession)
+                );
+                const existingRecordsSnap = await getDocs(q).catch(err => {
+                    handleFSLocalError(err, 'get', `records/${selectedClassId}/${targetDate}/${targetSession}`);
+                    throw err;
+                });
+                const countsMap: Record<string, number> = {};
+                existingRecordsSnap.docs.forEach(docSnap => {
+                    const data = docSnap.data();
+                    countsMap[data.studentId] = data.count || 0;
+                });
+                existingCountsBySession[sIdx] = countsMap;
+            }));
             
-            let totalDelta = 0;
-            
-            for (let i = 0; i < students.length; i++) {
-                const student = students[i];
-                const count = (scanConfirmResult[i] || 0) * multiplier;
-                
-                const prevCount = existingCountsMap[student.id] || 0;
-                const delta = count - prevCount;
-                
-                if (delta === 0) continue; 
+            const studentDeltaMap: Record<string, number> = {};
+            let grandTotalDelta = 0;
 
-                const recordId = `${student.id}_${scanTargetDate}_${targetSession.replace(/\(|\)/g, '_')}`;
-                const recordRef = doc(db, 'records', recordId);
+            for (const sIdx of sessionsToSave) {
+                const targetSession = SESSIONS[sIdx];
+                const targetDate = sessionDates[sIdx];
+                const sessionResult = scanResultsBySession[sIdx] || [];
                 
-                totalDelta += delta;
+                for (let i = 0; i < students.length; i++) {
+                    const student = students[i];
+                    const count = (sessionResult[i] || 0) * multiplier;
+                    
+                    const prevCount = existingCountsBySession[sIdx]?.[student.id] || 0;
+                    const delta = count - prevCount;
+                    
+                    if (delta === 0) continue; 
 
-                batch.set(recordRef, {
-                    studentId: student.id,
-                    classId: selectedClassId,
-                    count: count,
-                    date: scanTargetDate,
-                    session: targetSession,
-                    createdAt: serverTimestamp(),
-                    source: 'AI_SCAN'
-                }, { merge: true });
+                    const recordId = `${student.id}_${targetDate}_${targetSession.replace(/\(|\)/g, '_')}`;
+                    const recordRef = doc(db, 'records', recordId);
+                    
+                    studentDeltaMap[student.id] = (studentDeltaMap[student.id] || 0) + delta;
+                    grandTotalDelta += delta;
 
-                const studentRef = doc(db, 'students', student.id);
-                batch.update(studentRef, { totalCount: increment(delta) });
+                    batch.set(recordRef, {
+                        studentId: student.id,
+                        classId: selectedClassId,
+                        count: count,
+                        date: targetDate,
+                        session: targetSession,
+                        createdAt: serverTimestamp(),
+                        source: 'AI_SCAN'
+                    }, { merge: true });
+                }
             }
 
-            if (totalDelta !== 0) {
+            for (const [studentId, studentDelta] of Object.entries(studentDeltaMap)) {
+                if (studentDelta !== 0) {
+                    const studentRef = doc(db, 'students', studentId);
+                    batch.update(studentRef, { totalCount: increment(studentDelta) });
+                }
+            }
+
+            if (grandTotalDelta !== 0) {
                 const classRef = doc(db, 'classes', selectedClassId);
-                batch.update(classRef, { totalCount: increment(totalDelta) });
+                batch.update(classRef, { totalCount: increment(grandTotalDelta) });
             }
 
             await batch.commit().catch(err => {
                 handleFSLocalError(err, 'write', 'batch_ai_scan_save');
                 throw err;
             });
-            alert('AI 辨識數據已成功保存！');
-            setScanConfirmResult(null);
+            alert(sessionsToSave.length > 1 ? `AI 辨識數據已成功保存！（共 ${sessionsToSave.length} 個欄位）` : 'AI 辨識數據已成功保存！');
+            setScanResultsBySession(null);
             setShowVerify(false);
             if (onComplete) onComplete();
         } catch (err) {
@@ -2519,19 +2568,20 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
     return (
         <div className="space-y-6 pb-20">
             {!user && (
-                <Card className="bg-rose-500/10 border-rose-500/20 py-10 flex flex-col items-center justify-center text-center">
-                    <Globe className="text-rose-500 mb-4 animate-pulse" size={48} />
-                    <h3 className="text-xl font-black text-white mb-2">雲端同步未啟用</h3>
-                    <p className="text-slate-400 text-sm mb-6 max-w-xs">您必須先登入 Google 帳號，才能將辨識結果儲存至雲端。</p>
-                    <Button onClick={handleLogin} className="bg-indigo-600 hover:bg-indigo-500 px-8 h-12 rounded-2xl">
-                        立即登入並同步數據
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <Globe className="text-amber-400 shrink-0" size={20} />
+                        <p className="text-xs text-slate-300 font-bold">
+                            目前處於離線/訪客預覽模式，可直接測試掃描與辨識；若需儲存至雲端，請點擊右側登入。
+                        </p>
+                    </div>
+                    <Button onClick={handleLogin} className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs px-4 py-2 rounded-xl h-auto shrink-0 shadow-md">
+                        登入 Google
                     </Button>
-                </Card>
+                </div>
             )}
 
-            {user && (
-                <>
-                    <Card className="bg-indigo-600/10 border-indigo-500/20 rounded-[32px]">
+            <Card className="bg-indigo-600/10 border-indigo-500/20 rounded-[32px]">
                 <header className="flex items-center gap-3 mb-8">
                     <div className="w-12 h-12 bg-indigo-500/20 rounded-2xl flex items-center justify-center text-indigo-400">
                         <Camera size={28} />
@@ -2562,10 +2612,10 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                             {SESSIONS.map((label, index) => (
                                 <button 
                                     key={index}
-                                    onClick={() => setScanSessionIndex(index)}
+                                    onClick={() => setScanSessionMode(index)}
                                     className={cn(
                                         "py-4 rounded-2xl font-bold text-xs transition-all border shadow-sm",
-                                        scanSessionIndex === index 
+                                        scanSessionMode === index 
                                             ? "bg-indigo-600 border-indigo-500 text-white shadow-indigo-600/20 scale-105" 
                                             : "bg-white/5 border-white/5 text-white/40 hover:bg-white/10"
                                     )}
@@ -2573,6 +2623,48 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                                     {label}
                                 </button>
                             ))}
+                        </div>
+                        <button
+                            onClick={() => setScanSessionMode('all')}
+                            className={cn(
+                                "mt-3 w-full py-3.5 rounded-2xl font-black text-xs transition-all border shadow-sm flex items-center justify-center gap-2",
+                                scanSessionMode === 'all'
+                                    ? "bg-gradient-to-r from-indigo-600 to-teal-600 border-teal-400/50 text-white shadow-lg shadow-indigo-600/20 scale-[1.02]"
+                                    : "bg-white/5 border-white/10 text-indigo-200/70 hover:bg-white/10"
+                            )}
+                        >
+                            <span>✨ 一次掃描全部四欄（第一週～第四週）</span>
+                        </button>
+
+                        <div className="mt-4 pt-4 border-t border-white/10 space-y-2">
+                            <label className="block text-[10px] font-black text-indigo-300 uppercase tracking-[0.2em]">
+                                設定欄位歸檔日期 (DATE)
+                            </label>
+                            {scanSessionMode !== 'all' ? (
+                                <div className="flex items-center justify-between gap-3 bg-white/5 border border-white/10 rounded-2xl px-4 py-2.5">
+                                    <span className="text-xs font-black text-white">{SESSIONS[scanSessionMode]} 歸檔日期</span>
+                                    <input
+                                        type="date"
+                                        value={sessionDates[scanSessionMode] || date}
+                                        onChange={(e) => setSessionDates(prev => ({ ...prev, [scanSessionMode]: e.target.value }))}
+                                        className="p-2 border border-indigo-500/30 rounded-xl text-xs font-black bg-slate-900 text-indigo-100 outline-none"
+                                    />
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {[0, 1, 2, 3].map(sIdx => (
+                                        <div key={sIdx} className="flex items-center justify-between gap-2 bg-white/5 border border-white/10 rounded-2xl px-3 py-2">
+                                            <span className="text-xs font-black text-white shrink-0">{SESSIONS[sIdx]}</span>
+                                            <input
+                                                type="date"
+                                                value={sessionDates[sIdx] || date}
+                                                onChange={(e) => setSessionDates(prev => ({ ...prev, [sIdx]: e.target.value }))}
+                                                className="p-1.5 border border-indigo-500/30 rounded-xl text-[11px] font-black bg-slate-900 text-indigo-100 outline-none"
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
                 </div>
@@ -2654,7 +2746,13 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
 
             {/* Verification Modal */}
             <AnimatePresence>
-                {showVerify && scanConfirmResult && (
+                {showVerify && scanResultsBySession && (() => {
+                    const scannedIndices = Object.keys(scanResultsBySession).map(Number).sort((a, b) => a - b);
+                    const isMultiSession = scannedIndices.length > 1;
+                    const currentResults = scanResultsBySession[activeVerifySession] || [];
+                    const currentMarkedCount = currentResults.filter(r => r > 0).length;
+
+                    return (
                     <motion.div 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -2678,18 +2776,62 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
 
                         <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-slate-950 no-scrollbar pb-32">
                             {/* Date Picker for Scan */}
-                            <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-3xl p-4 flex items-center justify-between shadow-sm">
-                                <div>
-                                    <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest italic mb-1">歸檔日期 (Date)</label>
-                                    <div className="text-[10px] text-indigo-300/50 font-bold">目前欄位：{SESSIONS[scanSessionIndex]}</div>
+                            {!isMultiSession ? (
+                                <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-3xl p-4 flex items-center justify-between shadow-sm">
+                                    <div>
+                                        <label className="block text-[10px] font-black text-indigo-400 uppercase tracking-widest italic mb-1">歸檔日期 (Date)</label>
+                                        <div className="text-[10px] text-indigo-300/50 font-bold">目前欄位：{SESSIONS[scannedIndices[0]]}</div>
+                                    </div>
+                                    <input 
+                                        type="date" 
+                                        value={sessionDates[scannedIndices[0]] || ''}
+                                        onChange={(e) => setSessionDates(prev => ({ ...prev, [scannedIndices[0]]: e.target.value }))}
+                                        className="p-2.5 border border-indigo-500/20 rounded-xl text-xs font-black bg-slate-900 text-indigo-100 shadow-inner outline-none"
+                                    />
                                 </div>
-                                <input 
-                                    type="date" 
-                                    value={scanTargetDate}
-                                    onChange={(e) => setScanTargetDate(e.target.value)}
-                                    className="p-2.5 border border-indigo-500/20 rounded-xl text-xs font-black bg-slate-900 text-indigo-100 shadow-inner outline-none"
-                                />
-                            </div>
+                            ) : (
+                                <div className="bg-indigo-600/10 border border-indigo-500/20 rounded-3xl p-4 space-y-3 shadow-sm">
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest italic">各欄位歸檔日期設定 (4 Sessions)</label>
+                                        <span className="text-[10px] text-indigo-300/60 font-bold">可勾選要儲存的欄位與日期</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {scannedIndices.map(sIdx => {
+                                            const isEnabled = enabledSessions[sIdx] !== false;
+                                            const markedCount = (scanResultsBySession[sIdx] || []).filter(r => r > 0).length;
+                                            return (
+                                                <div
+                                                    key={sIdx}
+                                                    className={cn(
+                                                        "p-3 rounded-2xl border flex items-center justify-between gap-2 transition-all",
+                                                        isEnabled ? "bg-slate-900/80 border-indigo-500/30" : "bg-slate-900/30 border-white/5 opacity-50"
+                                                    )}
+                                                >
+                                                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isEnabled}
+                                                            onChange={(e) => setEnabledSessions(prev => ({ ...prev, [sIdx]: e.target.checked }))}
+                                                            className="w-4 h-4 rounded accent-indigo-500"
+                                                        />
+                                                        <span className="text-xs font-black text-white">{SESSIONS[sIdx]}</span>
+                                                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold">
+                                                            {markedCount} 人
+                                                        </span>
+                                                    </label>
+                                                    <input
+                                                        type="date"
+                                                        value={sessionDates[sIdx] || ''}
+                                                        disabled={!isEnabled}
+                                                        onChange={(e) => setSessionDates(prev => ({ ...prev, [sIdx]: e.target.value }))}
+                                                        className="p-2 border border-indigo-500/20 rounded-xl text-[11px] font-black bg-slate-950 text-indigo-100 outline-none disabled:opacity-40"
+                                                    />
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                </div>
+                            )}
 
                             {/* Canvas for Verification */}
                             <div className="bg-black rounded-3xl overflow-hidden shadow-2xl border-4 border-indigo-500/20 max-w-sm mx-auto">
@@ -2697,14 +2839,48 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                             </div>
 
                             <div className="space-y-4">
-                                <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2">辨識數據校正 (Correction)</div>
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 ml-2">
+                                    <div className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">辨識數據校正 (Correction)</div>
+                                    {isMultiSession && (
+                                        <div className="text-[11px] text-indigo-300 font-bold">
+                                            檢視欄位：{SESSIONS[activeVerifySession]}（{sessionDates[activeVerifySession] || '未選日期'} · {currentMarkedCount} 人有紀錄）
+                                        </div>
+                                    )}
+                                </div>
+
+                                {isMultiSession && (
+                                    <div className="grid grid-cols-4 gap-2">
+                                        {scannedIndices.map(sIdx => {
+                                            const markedCount = (scanResultsBySession[sIdx] || []).filter(r => r > 0).length;
+                                            const isActive = activeVerifySession === sIdx;
+                                            return (
+                                                <button
+                                                    key={sIdx}
+                                                    onClick={() => setActiveVerifySession(sIdx)}
+                                                    className={cn(
+                                                        "py-2.5 px-2 rounded-2xl text-xs font-black transition-all border flex flex-col items-center gap-0.5",
+                                                        isActive
+                                                            ? "bg-indigo-600 border-indigo-400 text-white shadow-lg shadow-indigo-600/30"
+                                                            : "bg-white/5 border-white/10 text-slate-400 hover:bg-white/10"
+                                                    )}
+                                                >
+                                                    <span>{SESSIONS[sIdx]}</span>
+                                                    <span className={cn("text-[10px] font-bold", isActive ? "text-indigo-200" : "text-slate-500")}>
+                                                        {markedCount} 人
+                                                    </span>
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+
                                 <div className="grid gap-3">
-                                    {scanConfirmResult.map((laps, index) => (
+                                    {currentResults.map((laps, index) => (
                                         <motion.div 
                                             initial={{ opacity: 0, x: -10 }}
                                             animate={{ opacity: 1, x: 0 }}
                                             transition={{ delay: index * 0.03 }}
-                                            key={index} 
+                                            key={`${activeVerifySession}-${index}`} 
                                             className="bg-white/5 border border-white/5 p-4 rounded-[24px] shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"
                                         >
                                             <div className="flex items-center gap-4">
@@ -2719,9 +2895,12 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                                                     <button 
                                                         key={n} 
                                                         onClick={() => {
-                                                            const newRes = [...scanConfirmResult];
-                                                            newRes[index] = n;
-                                                            setScanConfirmResult(newRes);
+                                                            setScanResultsBySession(prev => {
+                                                                if (!prev) return prev;
+                                                                const updated = [...(prev[activeVerifySession] || [])];
+                                                                updated[index] = n;
+                                                                return { ...prev, [activeVerifySession]: updated };
+                                                            });
                                                         }}
                                                         className={cn(
                                                             "min-w-[2.2rem] h-9 rounded-xl text-[10px] font-black transition-all",
@@ -2765,10 +2944,9 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                             </button>
                         </div>
                     </motion.div>
-                )}
+                    );
+                })()}
             </AnimatePresence>
-                </>
-            )}
         </div>
     );
 }
