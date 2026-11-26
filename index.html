@@ -5,12 +5,97 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>My Google AI Studio App</title>
     <script type="text/javascript">
+      window.cvReady = false;
+      window.cvLoadStatus = 'loading';
+      window.cvLoadError = null;
+
       window.onOpenCvReady = function() {
-        window.cvReady = true;
-        console.log('OpenCV.js is ready');
+        var checkRuntime = function() {
+          if (typeof window.cv !== 'undefined') {
+            if (typeof window.cv.then === 'function') {
+              window.cv.then(function(resolvedCv) {
+                window.cv = resolvedCv;
+                window.cvReady = true;
+                window.cvLoadStatus = 'ready';
+                window.cvLoadError = null;
+                console.log('OpenCV.js is ready (Promise)');
+              }).catch(function(err) {
+                window.cvLoadStatus = 'error';
+                window.cvLoadError = 'OpenCV WASM 初始化失敗';
+                console.error('OpenCV WASM init error:', err);
+              });
+              return;
+            }
+            if (typeof window.cv.Mat === 'function') {
+              window.cvReady = true;
+              window.cvLoadStatus = 'ready';
+              window.cvLoadError = null;
+              console.log('OpenCV.js is ready');
+              return;
+            }
+            if (!window.cv.__hookedReady) {
+              window.cv.__hookedReady = true;
+              var prevInit = window.cv.onRuntimeInitialized;
+              window.cv.onRuntimeInitialized = function() {
+                if (typeof prevInit === 'function') prevInit();
+                window.cvReady = true;
+                window.cvLoadStatus = 'ready';
+                window.cvLoadError = null;
+                console.log('OpenCV.js WASM runtime initialized');
+              };
+            }
+          }
+        };
+        checkRuntime();
       };
+
+      window.Module = {
+        onRuntimeInitialized: function() {
+          window.cvReady = true;
+          window.cvLoadStatus = 'ready';
+          window.cvLoadError = null;
+          console.log('OpenCV.js Module runtime initialized');
+        }
+      };
+
+      window.loadOpenCvScript = function() {
+        var urls = [
+          'https://docs.opencv.org/4.9.0/opencv.js',
+          'https://docs.opencv.org/4.x/opencv.js'
+        ];
+        window.cvReady = false;
+        window.cvLoadStatus = 'loading';
+        window.cvLoadError = null;
+
+        var oldScript = document.getElementById('opencv-js-script');
+        if (oldScript) oldScript.remove();
+
+        var tryLoad = function(index) {
+          if (index >= urls.length) {
+            window.cvLoadStatus = 'error';
+            window.cvLoadError = '無法從 CDN 載入影像辨識模組，請檢查網路或防火牆設定。';
+            return;
+          }
+          var script = document.createElement('script');
+          script.id = 'opencv-js-script';
+          script.async = true;
+          script.src = urls[index];
+          script.onload = function() {
+            window.onOpenCvReady();
+          };
+          script.onerror = function() {
+            console.warn('Failed to load OpenCV from:', urls[index]);
+            script.remove();
+            tryLoad(index + 1);
+          };
+          document.head.appendChild(script);
+        };
+
+        tryLoad(0);
+      };
+
+      window.loadOpenCvScript();
     </script>
-    <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();" type="text/javascript"></script>
   </head>
   <body>
     <div id="root"></div>

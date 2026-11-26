@@ -2266,7 +2266,7 @@ function AdminRecordsListView({ classes, user, handleLogin }: { classes: Class[]
 }
 
 function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes: Class[], user: User | null, handleLogin: () => void, onComplete?: () => void }) {
-    const isCvReady = useOpenCV();
+    const { ready: isCvReady, error: cvError, retry: retryCv } = useOpenCV();
     const [selectedClassId, setSelectedClassId] = useState('');
     const [image, setImage] = useState<string | null>(null);
     const [scanning, setScanning] = useState(false);
@@ -2363,31 +2363,73 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
         setScanTargetDate(date);
 
         const reader = new FileReader();
+        reader.onerror = () => {
+            setScanning(false);
+            alert('讀取圖片失敗，請重新選擇檔案');
+        };
         reader.onload = (event) => {
             const img = new Image();
-            img.src = event.target?.result as string;
-            img.onload = async () => {
-                const cv = (window as any).cv;
-                let src = cv.imread(img);
-                let warped = new cv.Mat();
-                cv.resize(src, warped, new cv.Size(800, 1000));
-                const { results, debugMat } = analyzeLaps(warped);
-                setScanConfirmResult(results);
+            img.onerror = () => {
                 setScanning(false);
-                setShowVerify(true);
-                
-                setTimeout(() => {
-                    if (canvasRef.current) {
-                        cv.imshow(canvasRef.current, debugMat);
-                    }
-                    src.delete();
-                    warped.delete();
-                    debugMat.delete();
-                }, 100);
+                alert('圖片格式無法解析，請重新拍攝或選擇圖片');
             };
+            img.onload = async () => {
+                let src: any = null;
+                let warped: any = null;
+                let debugMat: any = null;
+                try {
+                    const cv = (window as any).cv;
+                    if (!cv || typeof cv.Mat !== 'function') {
+                        throw new Error('OpenCV 尚未完成初始化');
+                    }
+                    src = cv.imread(img);
+                    warped = new cv.Mat();
+                    cv.resize(src, warped, new cv.Size(800, 1000));
+                    const analyzed = analyzeLaps(warped);
+                    debugMat = analyzed.debugMat;
+                    setScanConfirmResult(analyzed.results);
+                    setScanning(false);
+                    setShowVerify(true);
+                    
+                    setTimeout(() => {
+                        if (canvasRef.current && debugMat) {
+                            cv.imshow(canvasRef.current, debugMat);
+                        }
+                        src?.delete();
+                        warped?.delete();
+                        debugMat?.delete();
+                    }, 100);
+                } catch (err) {
+                    console.error('OpenCV Scan Error:', err);
+                    src?.delete();
+                    warped?.delete();
+                    debugMat?.delete();
+                    setScanning(false);
+                    alert('影像辨識處理失敗：' + (err instanceof Error ? err.message : '請重新嘗試'));
+                }
+            };
+            img.src = event.target?.result as string;
         };
         reader.readAsDataURL(file);
         e.target.value = '';
+    };
+
+    const triggerScan = (multiplier: 50 | 100) => {
+        if (!selectedClassId) {
+            alert('請先在上方選擇班級！');
+            return;
+        }
+        if (cvError) {
+            alert(cvError);
+            return;
+        }
+        if (!isCvReady) {
+            alert('影像辨識模組尚在載入中，請稍候再試！');
+            return;
+        }
+        if (scanning) return;
+        setScanMultiplier(multiplier);
+        fileInputRef.current?.click();
     };
 
     const handleSave = async () => {
@@ -2536,7 +2578,20 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                 </div>
             </Card>
 
-            {!isCvReady && (
+            {cvError ? (
+                <div className="bg-rose-500/10 text-rose-300 p-3 text-xs text-center rounded-xl font-bold flex flex-col sm:flex-row items-center justify-center gap-2 border border-rose-500/30">
+                    <span className="flex items-center gap-1.5">
+                        <AlertTriangle size={14} className="text-rose-400 shrink-0" />
+                        {cvError}
+                    </span>
+                    <button
+                        onClick={retryCv}
+                        className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 rounded-lg text-[11px] font-black transition-colors"
+                    >
+                        重新載入模組
+                    </button>
+                </div>
+            ) : !isCvReady && (
                 <div className="bg-amber-50/10 text-amber-400 p-3 text-[10px] text-center rounded-xl font-bold animate-pulse flex items-center justify-center gap-2 border border-amber-500/20">
                     <Loader2 className="animate-spin" size={14} /> ⏳ 影像辨識模組載入中，請稍候...
                 </div>
@@ -2544,12 +2599,10 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
 
             <div className="grid grid-cols-2 gap-3 mb-4">
                 <button 
-                    onClick={() => {
-                        setScanMultiplier(50);
-                        fileInputRef.current?.click();
-                    }}
+                    onClick={() => triggerScan(50)}
                     className={cn(
                         "flex items-center justify-center gap-2 py-4 rounded-3xl text-sm font-black transition-all shadow-lg active:scale-95 border-b-4",
+                        (!isCvReady || !selectedClassId || scanning) && "opacity-60 cursor-not-allowed",
                         scanMultiplier === 50 ? 'bg-indigo-600 border-indigo-800 text-white' : 'bg-white/5 border-white/10 text-slate-500'
                     )}
                 >
@@ -2557,12 +2610,10 @@ function AdminAIInputView({ classes, user, handleLogin, onComplete }: { classes:
                     📸 掃描低年級
                 </button>
                 <button 
-                    onClick={() => {
-                        setScanMultiplier(100);
-                        fileInputRef.current?.click();
-                    }}
+                    onClick={() => triggerScan(100)}
                     className={cn(
                         "flex items-center justify-center gap-2 py-4 rounded-3xl text-sm font-black transition-all shadow-lg active:scale-95 border-b-4",
+                        (!isCvReady || !selectedClassId || scanning) && "opacity-60 cursor-not-allowed",
                         scanMultiplier === 100 ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white/5 border-white/10 text-slate-400'
                     )}
                 >
